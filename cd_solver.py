@@ -4,9 +4,10 @@ import copy
 import random
 import sys
 import argparse
+import curses
 
-# LINECHARS = ['0', '1', '.', '*', '$', '/', '|', '#']
-LINECHARS = ['0', '0', '1', ' ']
+LINECHARS = ['0', '0', '1', '.', ' ']
+LINECOLRS = [23, 29, 35, 41]
 
 
 def is_factor(b, a):
@@ -24,21 +25,26 @@ def choose_number(numbers):
         numbers.remove(num)
         return num
 
+    return None
+
 
 def do_op(a, b, op):
     """ Perform an operator on two numbers """
 
     if op == '+':
         return a + b
-    elif op == '-':
+    if op == '-':
         return a - b
-    elif op == '*':
+    if op == '*':
         return a * b
-    elif op == '/':
+    if op == '/':
         return a // b
+
+    return None
 
 
 def guess(target, numbers, steps=None):
+    """ Guess a solution  """
 
     numbers = copy.copy(numbers)
 
@@ -46,7 +52,7 @@ def guess(target, numbers, steps=None):
         steps = []
 
     if target in numbers:
-        return ["{} = {}".format(target, target)]
+        return ["{0} = {0}".format(target)]
 
     while numbers:
 
@@ -73,63 +79,84 @@ def guess(target, numbers, steps=None):
         if res == target:
             return steps
 
-        else:
-            numbers.append(res)
-            return guess(target, numbers, steps)
+        numbers.append(res)
+        return guess(target, numbers, steps)
 
     return False
 
 
-def randline(line):
+def randline(line, num, width):
+    """ randomised line of cool, matrix-y looking rubbish """
+
+    linechars = LINECHARS + [' ' for _ in range(num // 10)]
 
     if line is None:
-        line = random.choice(LINECHARS)
-    elif len(line) > 2:
-        idx = random.randint(1, len(line) - 1)
-        line = line[:idx] + random.choice(LINECHARS) + line[idx + 1:]
+        return ''.join([random.choice(linechars) for _ in range(width)])
 
-    for ch in line:
-        sys.stdout.write('\x1b[{};32;40m'.format(random.randint(0, 2)))
-        sys.stdout.write(ch)
-    sys.stdout.write('\x1b[0m')
-
-    sys.stdout.flush()
-    sys.stdout.write('\b' * len(line))
-
-    if len(line) < 80 and random.choice([True, False, False, False]):
-        line = line + random.choice(LINECHARS)
+    num = random.randint(0, width - 1)
+    line = line[:num] + random.choice(linechars) + line[num + 1:]
 
     return line
 
 
-def main():
-
-    parser = argparse.ArgumentParser(description='Solve numbers game.')
-    parser.add_argument('-n','--nums', nargs='+', type=int, help='<Required> Numbers', required=True)
-    parser.add_argument('-t','--targ', type=int, help='<Required> Target', required=True)
-    args = parser.parse_args()
+def main(stdscr):
+    """ main function """
 
     num_attempts = 0
     solution = None
-    line = None
 
-    while not solution:
+    stdscr.clear()
+    height, width = stdscr.getmaxyx()
+    height -= 1
+    width -= 1
+    lines = {}
+
+    while (not solution) or num_attempts < 1e4:
 
         solution = guess(args.targ, args.nums)
         num_attempts += 1
 
-        if num_attempts % 10 == 0:
-            line = randline(line)
-        if num_attempts % 500 == 0 and len(line) == 80:
-            line = None
-            print()
+        if not (num_attempts % 111):
+            line_num = num_attempts % height
+            line = lines.get(line_num, None)
+            lines[line_num] = randline(line, line_num, width)
+            for x in range(width):
+                color = curses.color_pair(random.choice(LINECOLRS))
+                char = lines[line_num][x]
+                stdscr.addstr(line_num, x, char, color)
+            stdscr.refresh()
 
         if num_attempts > 1e6:
-            print("\nCouldn't find a solution.")
+            msg = "Couldn't find a solution."
+            width_mid = (width - len(msg)) // 2
+            stdscr.addstr(height // 2, width_mid, msg)
+            stdscr.refresh()
+            stdscr.getkey()
             sys.exit(1)
 
-    print("\n\n" + "\n".join(solution))
+    for y in range(height):
+        stdscr.addstr(y, 0, ' ' * width)
+    stdscr.refresh()
+
+    height_mid = (height - len(solution)) // 2
+    width_mid = (width - max([len(x) for x in solution])) // 2
+    for y, s in enumerate(solution):
+        stdscr.addstr(height_mid + y, width_mid, s)
+    stdscr.refresh()
+    stdscr.getkey()
 
 
 if __name__ == '__main__':
-    main()
+
+    parser = argparse.ArgumentParser(description='Solve numbers game.')
+    parser.add_argument('-n', '--nums', nargs='+', type=int, help='<Required> Numbers', required=True)
+    parser.add_argument('-t', '--targ', type=int, help='<Required> Target', required=True)
+    args = parser.parse_args()
+
+    curses.initscr()
+    curses.curs_set(0)
+    curses.start_color()
+    curses.use_default_colors()
+    for i in range(curses.COLORS):
+        curses.init_pair(i, i, -1)
+    curses.wrapper(main)
