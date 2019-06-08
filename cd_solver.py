@@ -7,7 +7,8 @@ import argparse
 import curses
 
 LINECHARS = ['0', '0', '1', '.', ' ']
-LINECOLRS = [23, 29, 35, 41]
+LINECOLRS = [23, 29, 35]
+# LINECOLRS = [22, 28, 34, 40, 48, 82, 112, 120]
 BIGNUM = 1e32
 
 FONT = {
@@ -226,12 +227,29 @@ def randline(line, num, width, solution):
     linechars += solution_chars
 
     if line is None:
-        return ''.join([random.choice(linechars) for _ in range(width)])
+        line_txt = ''.join([random.choice(linechars) for _ in range(width)])
+        line_col = [curses.color_pair(random.choice(LINECOLRS)) for _ in line_txt]
+    else:
+        for _ in range(random.randint(1, 5)):
+            num = random.randint(0, width - 1)
+            line_txt = line[0][:num] + random.choice(linechars) + line[0][num + 1:]
+            rcol = curses.color_pair(random.choice(LINECOLRS))
+            line_col = line[1][:num] + [rcol] + line[1][num + 1:]
 
-    num = random.randint(0, width - 1)
-    line = line[:num] + random.choice(linechars) + line[num + 1:]
+    return [line_txt, line_col]
 
-    return line
+
+def print_all_colors(stdscr):
+    """ print all color pairs """
+
+    for row in range(16):
+        for col in range(8):
+            color = col + (row * 8)
+            ccol = curses.color_pair(color)
+            stdscr.addstr(row, col * 5, "{:<4} ".format(color), ccol)
+    stdscr.refresh()
+    stdscr.getkey()
+    exit()
 
 
 def main(stdscr):
@@ -254,16 +272,15 @@ def main(stdscr):
         num_attempts += 1
 
         # update the screen
-        if not num_attempts % 101:
+        if not num_attempts % 17:
 
             line_num = num_attempts % height
-            line = lines.get(line_num, None)
-            lines[line_num] = randline(line, line_num, width, solution)
+            lines[line_num] = randline(lines.get(line_num, None), line_num, width, solution)
 
             for x in range(width):
 
-                color = curses.color_pair(random.choice(LINECOLRS))
-                char = lines[line_num][x]
+                char = lines[line_num][0][x]
+                color = lines[line_num][1][x]
                 stdscr.addstr(line_num, x, char, color)
 
             stdscr.refresh()
@@ -280,27 +297,28 @@ def main(stdscr):
 
     stdscr.refresh()
 
-    # print out the best solution
-    height_mid = (height - len(solution)) // 2
-    width_mid = (width - max([len(x) for x in solution])) // 2
-
+    # print out the target
     target = "{} {}".format(args.nums, [args.targ])
-    stdscr.addstr(height_mid - 2, (width - len(target)) // 2, target)
+    color = curses.color_pair(LINECOLRS[-1])
+    stdscr.addstr(1, (width - len(target)) // 2, target, color)
+
+    # print out the best solution
 
     sol_lines = print_font(solution, width)
+    height_mid = (height - (len(solution) * 6)) // 2
 
-    height_mid = (height - (len(solution) * 5)) // 2
     for y, s in enumerate(sol_lines):
         ys = height_mid + y
         for x in range(width):
-            color = curses.color_pair(random.choice(LINECOLRS))
             if x > (len(s) - 1):
-                char = lines[ys][x]
+                char = lines[ys][0][x]
+                color = lines[ys][1][x]
             elif s[x] == " ":
-                char = lines[ys][x]
+                char = lines[ys][0][x]
+                color = lines[ys][1][x]
             else:
                 char = s[x]
-                color = curses.COLOR_WHITE
+                color = curses.color_pair(LINECOLRS[-1])
             stdscr.addstr(ys, x, char, color)
 
     stdscr.refresh()
