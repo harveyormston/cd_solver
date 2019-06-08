@@ -8,6 +8,124 @@ import curses
 
 LINECHARS = ['0', '0', '1', '.', ' ']
 LINECOLRS = [23, 29, 35, 41]
+BIGNUM = 1e32
+
+FONT = {
+    "0": ["█████",
+          "██ ██",
+          "██ ██",
+          "██ ██",
+          "█████"],
+
+    "1": [" ███ ",
+          "████ ",
+          " ███ ",
+          " ███ ",
+          "█████"],
+
+    "2": ["█████",
+          "   ██",
+          "█████",
+          "██   ",
+          "█████"],
+
+    "3": ["█████",
+          "   ██",
+          " ████",
+          "   ██",
+          "█████"],
+
+    "4": ["██ ██",
+          "██ ██",
+          "█████",
+          "   ██",
+          "   ██"],
+
+    "5": ["█████",
+          "██   ",
+          "█████",
+          "   ██",
+          "█████"],
+
+    "6": ["█████",
+          "██   ",
+          "█████",
+          "██ ██",
+          "█████"],
+
+    "7": ["█████",
+          "   ██",
+          "   ██",
+          "   ██",
+          "   ██"],
+
+    "8": ["█████",
+          "██ ██",
+          "█████",
+          "██ ██",
+          "█████"],
+
+    "9": ["█████",
+          "██ ██",
+          "█████",
+          "   ██",
+          "█████"],
+
+    "+": ["     ",
+          "  █  ",
+          "█████",
+          "  █  ",
+          "     "],
+
+    "-": ["     ",
+          "     ",
+          "█████",
+          "     ",
+          "     "],
+
+    "/": ["  █  ",
+          "     ",
+          "█████",
+          "     ",
+          "  █  "],
+
+    "*": ["     ",
+          " █ █ ",
+          "  █  ",
+          " █ █ ",
+          "     "],
+
+    "=": ["     ",
+          "█████",
+          "     ",
+          "█████",
+          "     "],
+
+    " ": ["     ",
+          "     ",
+          "     ",
+          "     ",
+          "     "],
+}
+
+
+def print_font(strings, width):
+    """ print a set of strings using font """
+
+    lines = []
+    for s in strings:
+        for row in range(5):
+            line = []
+            for c in s:
+                line.append(" " + FONT[c][row])
+            line = "".join(line)
+            if len(line) < width:
+                front_pad = (width - len(line)) // 2
+                back_pad = len(line) + front_pad - width
+                line = (" " * front_pad) + line + (" " * back_pad)
+            lines.append(line)
+        lines.append("")
+    return lines
 
 
 def is_factor(b, a):
@@ -43,7 +161,7 @@ def do_op(a, b, op):
     return None
 
 
-def guess(target, numbers, steps=None):
+def guess(target, numbers, steps=None, best=None):
     """ Guess a solution  """
 
     numbers = copy.copy(numbers)
@@ -52,7 +170,10 @@ def guess(target, numbers, steps=None):
         steps = []
 
     if target in numbers:
-        return ["{0} = {0}".format(target)]
+        return 0, ["{0} = {0}".format(target)]
+
+    if not best:
+        best = [BIGNUM, '.']
 
     while numbers:
 
@@ -60,7 +181,7 @@ def guess(target, numbers, steps=None):
         num_b = choose_number(numbers)
 
         if None in (num_a, num_b):
-            return False
+            break
 
         if num_b > num_a:
             num_a, num_b = num_b, num_a
@@ -72,23 +193,37 @@ def guess(target, numbers, steps=None):
 
         res = do_op(num_a, num_b, op)
 
-        opstr = "{:>4d} {} {:<4d} = {}".format(num_a, op, num_b, res)
+        if res == 0:
+            continue
+
+        opstr = "{:>4d} {} {:<4d} = {:<4d}".format(num_a, op, num_b, res)
 
         steps.append(opstr)
 
-        if res == target:
-            return steps
+        error = abs(res - target)
+
+        if error < best[0]:
+            best[0] = error
+            best[1] = steps
+            break
+
+        if error == 0:
+            break
 
         numbers.append(res)
-        return guess(target, numbers, steps)
 
-    return False
+        return guess(target, numbers, steps, best)
+
+    return best
 
 
-def randline(line, num, width):
+def randline(line, num, width, solution):
     """ randomised line of cool, matrix-y looking rubbish """
 
-    linechars = LINECHARS + [' ' for _ in range(num // 10)]
+    linechars = LINECHARS * 100
+
+    solution_chars = [y for x in solution for y in x]
+    linechars += solution_chars
 
     if line is None:
         return ''.join([random.choice(linechars) for _ in range(width)])
@@ -103,7 +238,7 @@ def main(stdscr):
     """ main function """
 
     num_attempts = 0
-    solution = None
+    error, solution = BIGNUM, None
 
     stdscr.clear()
     height, width = stdscr.getmaxyx()
@@ -111,37 +246,63 @@ def main(stdscr):
     width -= 1
     lines = {}
 
-    while (not solution) or num_attempts < 1e4:
+    # find the best guess
+    while (error > 0) or num_attempts < 1e4:
 
-        solution = guess(args.targ, args.nums)
+        error, solution = guess(args.targ, args.nums, best=[error, solution])
+
         num_attempts += 1
 
-        if not (num_attempts % 111):
+        # update the screen
+        if not num_attempts % 101:
+
             line_num = num_attempts % height
             line = lines.get(line_num, None)
-            lines[line_num] = randline(line, line_num, width)
+            lines[line_num] = randline(line, line_num, width, solution)
+
             for x in range(width):
+
                 color = curses.color_pair(random.choice(LINECOLRS))
                 char = lines[line_num][x]
                 stdscr.addstr(line_num, x, char, color)
+
             stdscr.refresh()
 
+        # stop if no solution found
         if num_attempts > 1e6:
-            msg = "Couldn't find a solution."
+
+            msg = "Couldn't find an exact solution."
             width_mid = (width - len(msg)) // 2
             stdscr.addstr(height // 2, width_mid, msg)
             stdscr.refresh()
             stdscr.getkey()
-            sys.exit(1)
+            break
 
-    for y in range(height):
-        stdscr.addstr(y, 0, ' ' * width)
     stdscr.refresh()
 
+    # print out the best solution
     height_mid = (height - len(solution)) // 2
     width_mid = (width - max([len(x) for x in solution])) // 2
-    for y, s in enumerate(solution):
-        stdscr.addstr(height_mid + y, width_mid, s)
+
+    target = "{} {}".format(args.nums, [args.targ])
+    stdscr.addstr(height_mid - 2, (width - len(target)) // 2, target)
+
+    sol_lines = print_font(solution, width)
+
+    height_mid = (height - (len(solution) * 5)) // 2
+    for y, s in enumerate(sol_lines):
+        ys = height_mid + y
+        for x in range(width):
+            color = curses.color_pair(random.choice(LINECOLRS))
+            if x > (len(s) - 1):
+                char = lines[ys][x]
+            elif s[x] == " ":
+                char = lines[ys][x]
+            else:
+                char = s[x]
+                color = curses.COLOR_WHITE
+            stdscr.addstr(ys, x, char, color)
+
     stdscr.refresh()
     stdscr.getkey()
 
