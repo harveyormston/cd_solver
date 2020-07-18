@@ -6,9 +6,10 @@ import sys
 import argparse
 import curses
 
+BOTTOM_NUMS = list(range(1, 11)) * 2
+TOP_NUMS = [25, 50, 75, 100]
 LINECHARS = ['0', '0', '1', '.', ' ']
 LINECOLRS = [23, 29, 35]
-# LINECOLRS = [22, 28, 34, 40, 48, 82, 112, 120]
 BIGNUM = 1e32
 
 FONT = {
@@ -137,7 +138,7 @@ def is_factor(b, a):
 
 
 def choose_number(numbers):
-    """ Randomly a number """
+    """ Randomly choose a number from a list and remove it from the list """
 
     if numbers:
         num = random.choice(numbers)
@@ -162,41 +163,86 @@ def do_op(a, b, op):
     return None
 
 
+def remove_unused_steps(steps):
+    """ Remove any step whose result is not used in subsequent steps """
+
+    used_numbers = []
+    for step in steps:
+        num_a, _op, num_b, _eq, res = step.split()
+        used_numbers += [num_a, num_b]
+    steps_to_remove = []
+    for step in steps[:-1]:
+        num_a, _op, num_b, _eq, res = step.split()
+        if not res in used_numbers:
+            steps_to_remove.append(step)
+    for step in steps_to_remove:
+        steps.remove(step)
+
+
 def guess(target, numbers, steps=None, best=None):
-    """ Guess a solution  """
+    """ Guess a solution
+
+        :param target number : the result we want to achieve
+        :param numbers [number] : the numbers we can use in the solution
+        :param steps list : the steps we have taken so far to reach the
+            solution
+        :param best tuple : the best solution so far (x, y) where x is the
+            amount of error in the solution and y is the steps we took to get
+            there
+
+        :returns tuple : the best solution (x, y) where x is the amount of
+            error in the solution and y is the steps we took to get there
+    """
 
     numbers = copy.copy(numbers)
 
     if not steps:
         steps = []
 
+    # if the target is in the list of numbers we have, then we already have the
+    # solution
     if target in numbers:
         return 0, ["{0} = {0}".format(target)]
 
     if not best:
-        best = [BIGNUM, '.']
+        best = (BIGNUM, ['.'])
 
+    # keep trying until we run out of numbers to use
     while numbers:
 
         num_a = choose_number(numbers)
         num_b = choose_number(numbers)
 
         if None in (num_a, num_b):
+            # we weren't able to get 2 numbers to use in this step, so give up
             break
 
         if num_b > num_a:
+            # num_a should be the higher number, in case we wish to do division
             num_a, num_b = num_b, num_a
 
-        if is_factor(num_b, num_a):
-            op = random.choice(['+', '-', '*', '/'])
-        else:
-            op = random.choice(['+', '-', '*'])
+
+        ops = ['+', '-']
+
+        if not 1 in (num_a, num_b):
+            # it's only worth multiplying or dividing if both numbers are not 1
+            ops.append('*')
+            if is_factor(num_b, num_a):
+                # it's only worth dividing if num_b is a factor of num_a
+                ops.append('/')
+
+        op = random.choice(ops)
 
         res = do_op(num_a, num_b, op)
 
         if res == 0:
+            # if performing the op gave a result of 0, that will not be any use
+            # in getting closer to the result, so put the numbers back and try
+            # again
+            numbers += [num_a, num_b]
             continue
 
+        # record the op performed on this step
         opstr = "{:>4d} {} {:<4d} = {:<4d}".format(num_a, op, num_b, res)
 
         steps.append(opstr)
@@ -204,15 +250,18 @@ def guess(target, numbers, steps=None, best=None):
         error = abs(res - target)
 
         if error < best[0]:
-            best[0] = error
-            best[1] = steps
-            break
+            # record this as the best result so far
+            best = (error, steps)
 
         if error == 0:
+            # we have reached the target
             break
 
+        # add the result to our group of numbers for potential re-use in
+        # subsequent steps
         numbers.append(res)
 
+        # perform another step
         return guess(target, numbers, steps, best)
 
     return best
@@ -221,15 +270,16 @@ def guess(target, numbers, steps=None, best=None):
 def randline(line, num, width, solution):
     """ randomised line of cool, matrix-y looking rubbish """
 
-    linechars = LINECHARS * 100
-
-    solution_chars = [y for x in solution for y in x]
-    linechars += solution_chars
+    # our pool of random characters will have some of the solution thus far
+    # sprinkled in for variation
+    linechars = (LINECHARS * 100) + [y for x in solution for y in x]
 
     if line is None:
+        # a whole line of random junk
         line_txt = ''.join([random.choice(linechars) for _ in range(width)])
         line_col = [curses.color_pair(random.choice(LINECOLRS)) for _ in line_txt]
     else:
+        # just modify 4 random characters in the line
         for _ in range(random.randint(1, 5)):
             num = random.randint(0, width - 1)
             line_txt = line[0][:num] + random.choice(linechars) + line[0][num + 1:]
@@ -252,6 +302,15 @@ def print_all_colors(stdscr):
     exit()
 
 
+def has_solution(targ, nums):
+    """ True if a solution is possible """
+
+    error, solution = BIGNUM, None
+    for _ in range(1000):
+        error, solution = guess(targ, nums, best=(error, solution))
+    return error == 0
+
+
 def main(stdscr):
     """ main function """
 
@@ -264,10 +323,35 @@ def main(stdscr):
     width -= 1
     lines = {}
 
-    # find the best guess
-    while (error > 0) or num_attempts < 1e4:
+    # print out the target
+    target = [" ".join([str(x) for x in args.nums]), str(args.targ)]
+    targ_lines = print_font(target, width)
+    height_mid = (height - (len(target) * 6)) // 2
+    for y, s in enumerate(targ_lines):
+        ys = height_mid + y
+        for x in range(width):
+            if x > (len(s) - 1):
+                pass
+            elif s[x] == " ":
+                pass
+            else:
+                char = s[x]
+                color = curses.color_pair(LINECOLRS[-1])
+                try:
+                    stdscr.addstr(ys, x, char, color)
+                except:
+                    raise ValueError("{} {} {} {}".format(ys, x, char, color))
+    stdscr.getkey()
 
-        error, solution = guess(args.targ, args.nums, best=[error, solution])
+    # find the best guess
+
+    # try a certain minimum number of attempts so that is looks like the
+    # computer is doing some actual work, even if it finds the answer very
+    # quickly
+    min_attempts = 4e4
+    while (error > 0) or num_attempts < min_attempts:
+
+        error, solution = guess(args.targ, args.nums, best=(error, solution))
 
         num_attempts += 1
 
@@ -286,7 +370,7 @@ def main(stdscr):
             stdscr.refresh()
 
         # stop if no solution found
-        if num_attempts > 1e6:
+        if num_attempts > 5e5:
 
             msg = "Couldn't find an exact solution."
             width_mid = (width - len(msg)) // 2
@@ -300,10 +384,23 @@ def main(stdscr):
     # print out the target
     target = "{} {}".format(args.nums, [args.targ])
     color = curses.color_pair(LINECOLRS[-1])
-    stdscr.addstr(1, (width - len(target)) // 2, target, color)
+    trgt_start = (width - len(target)) // 2
+    trgt_end = trgt_start + len(target)
+    stdscr.addstr(1, trgt_start, target, color)
+    for x in range(trgt_start, trgt_end):
+        color = curses.color_pair(LINECOLRS[-1])
+        char = target[x - trgt_start]
+        try:
+            line = list(lines[1][0])
+            line[x] = char
+            lines[1][0] = "".join(line)
+            lines[1][1][x] = color
+            stdscr.addstr(line_num, x, char, color)
+        except:
+            raise ValueError("{}".format(lines[1][0][x]))
 
     # print out the best solution
-
+    remove_unused_steps(solution)
     sol_lines = print_font(solution, width)
     height_mid = (height - (len(solution) * 6)) // 2
 
@@ -322,15 +419,33 @@ def main(stdscr):
             stdscr.addstr(ys, x, char, color)
 
     stdscr.refresh()
-    stdscr.getkey()
+    return stdscr.getkey() == 'q'
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Solve numbers game.')
-    parser.add_argument('-n', '--nums', nargs='+', type=int, help='<Required> Numbers', required=True)
-    parser.add_argument('-t', '--targ', type=int, help='<Required> Target', required=True)
+    parser.add_argument('-n', '--nums', nargs='+', type=int, help='Numbers', default=None)
+    parser.add_argument('-t', '--targ', type=int, help='Target', default=None)
     args = parser.parse_args()
+
+    rand_nums = args.nums is None
+    rand_targ = args.targ is None
+    randomized = rand_nums or rand_targ
+
+    def random_problem():
+        while True:
+            nums, targ = args.nums, args.targ
+            if rand_nums:
+                n_top = random.randint(0, len(TOP_NUMS)+1)
+                random.shuffle(TOP_NUMS)
+                random.shuffle(BOTTOM_NUMS)
+                nums = TOP_NUMS[:n_top] + BOTTOM_NUMS[:6-n_top]
+            if rand_targ:
+                targ = random.randint(101, 1000)
+            if has_solution(targ, nums):
+                args.nums, args.targ = nums, targ
+                break
 
     curses.initscr()
     curses.curs_set(0)
@@ -338,4 +453,10 @@ if __name__ == '__main__':
     curses.use_default_colors()
     for i in range(curses.COLORS):
         curses.init_pair(i, i, -1)
-    curses.wrapper(main)
+    if not randomized:
+        curses.wrapper(main)
+    else:
+        while True:
+            random_problem()
+            if curses.wrapper(main):
+                break
